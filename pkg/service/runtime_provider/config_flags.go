@@ -17,7 +17,6 @@ limitations under the License.
 package runtime_provider
 
 import (
-	"github.com/spf13/pflag"
 	"helm.sh/helm/pkg/action"
 	"helm.sh/helm/pkg/cli"
 	"helm.sh/helm/pkg/kube"
@@ -37,25 +36,6 @@ import (
 	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
-)
-
-const (
-	flagClusterName      = "cluster"
-	flagAuthInfoName     = "user"
-	flagContext          = "context"
-	flagNamespace        = "namespace"
-	flagAPIServer        = "server"
-	flagInsecure         = "insecure-skip-tls-verify"
-	flagCertFile         = "client-certificate"
-	flagKeyFile          = "client-key"
-	flagCAFile           = "certificate-authority"
-	flagBearerToken      = "token"
-	flagImpersonate      = "as"
-	flagImpersonateGroup = "as-group"
-	flagUsername         = "username"
-	flagPassword         = "password"
-	flagTimeout          = "request-timeout"
-	flagHTTPCacheDir     = "cache-dir"
 )
 
 var defaultCacheDir = filepath.Join(homedir.HomeDir(), ".kube", "http-cache")
@@ -120,7 +100,7 @@ func (f *ConfigFlags) ToRawKubeConfigLoader() clientcmd.ClientConfig {
 func (f *ConfigFlags) toRawKubeConfigLoader() clientcmd.ClientConfig {
 	var clientConfig clientcmd.ClientConfig
 
-	clientConfig, _ = clientcmd.NewClientConfigFromBytes([]byte{})
+	clientConfig, _ = clientcmd.NewClientConfigFromBytes(f.CredentialContent)
 
 	// we only have an interactive prompt when a password is allowed
 	//if f.Password == nil {
@@ -181,65 +161,6 @@ func (f *ConfigFlags) ToRESTMapper() (meta.RESTMapper, error) {
 	mapper := restmapper.NewDeferredDiscoveryRESTMapper(discoveryClient)
 	expander := restmapper.NewShortcutExpander(mapper, discoveryClient)
 	return expander, nil
-}
-
-// AddFlags binds client configuration flags to a given flagset
-func (f *ConfigFlags) AddFlags(flags *pflag.FlagSet) {
-	if f.KubeConfig != nil {
-		flags.StringVar(f.KubeConfig, "kubeconfig", *f.KubeConfig, "Path to the kubeconfig file to use for CLI requests.")
-	}
-	if f.CacheDir != nil {
-		flags.StringVar(f.CacheDir, flagHTTPCacheDir, *f.CacheDir, "Default HTTP cache directory")
-	}
-
-	// add config options
-	if f.CertFile != nil {
-		flags.StringVar(f.CertFile, flagCertFile, *f.CertFile, "Path to a client certificate file for TLS")
-	}
-	if f.KeyFile != nil {
-		flags.StringVar(f.KeyFile, flagKeyFile, *f.KeyFile, "Path to a client key file for TLS")
-	}
-	if f.BearerToken != nil {
-		flags.StringVar(f.BearerToken, flagBearerToken, *f.BearerToken, "Bearer token for authentication to the API server")
-	}
-	if f.Impersonate != nil {
-		flags.StringVar(f.Impersonate, flagImpersonate, *f.Impersonate, "Username to impersonate for the operation")
-	}
-	if f.ImpersonateGroup != nil {
-		flags.StringArrayVar(f.ImpersonateGroup, flagImpersonateGroup, *f.ImpersonateGroup, "Group to impersonate for the operation, this flag can be repeated to specify multiple groups.")
-	}
-	if f.Username != nil {
-		flags.StringVar(f.Username, flagUsername, *f.Username, "Username for basic authentication to the API server")
-	}
-	if f.Password != nil {
-		flags.StringVar(f.Password, flagPassword, *f.Password, "Password for basic authentication to the API server")
-	}
-	if f.ClusterName != nil {
-		flags.StringVar(f.ClusterName, flagClusterName, *f.ClusterName, "The name of the kubeconfig cluster to use")
-	}
-	if f.AuthInfoName != nil {
-		flags.StringVar(f.AuthInfoName, flagAuthInfoName, *f.AuthInfoName, "The name of the kubeconfig user to use")
-	}
-	if f.Namespace != nil {
-		flags.StringVarP(f.Namespace, flagNamespace, "n", *f.Namespace, "If present, the namespace scope for this CLI request")
-	}
-	if f.Context != nil {
-		flags.StringVar(f.Context, flagContext, *f.Context, "The name of the kubeconfig context to use")
-	}
-
-	if f.APIServer != nil {
-		flags.StringVarP(f.APIServer, flagAPIServer, "s", *f.APIServer, "The address and port of the Kubernetes API server")
-	}
-	if f.Insecure != nil {
-		flags.BoolVar(f.Insecure, flagInsecure, *f.Insecure, "If true, the server's certificate will not be checked for validity. This will make your HTTPS connections insecure")
-	}
-	if f.CAFile != nil {
-		flags.StringVar(f.CAFile, flagCAFile, *f.CAFile, "Path to a cert file for the certificate authority")
-	}
-	if f.Timeout != nil {
-		flags.StringVar(f.Timeout, flagTimeout, *f.Timeout, "The length of time to wait before giving up on a single server request. Non-zero values should contain a corresponding time unit (e.g. 1s, 2m, 3h). A value of zero means don't timeout requests.")
-	}
-
 }
 
 // NewConfigFlags returns ConfigFlags with default values set
@@ -304,7 +225,7 @@ func NewActionConfig(allNamespaces bool, credentialContent []byte) *action.Confi
 	kc := kube.New(kubeConfig(credentialContent))
 	//kc.Log = logf
 
-	clientset, err := kc.KubernetesClientSet()
+	clientset, err := kc.Factory.KubernetesClientSet()
 	if err != nil {
 		// TODO return error
 		log.Fatal(err)
