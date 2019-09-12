@@ -7,7 +7,7 @@ package main
 
 import (
 	"openpitrix.io/openpitrix/pkg/config"
-	"openpitrix.io/runtime-provider-kubernetes/pkg/service/runtime_provider"
+	"openpitrix.io/runtime-provider-helm3/pkg/service/runtime_provider"
 )
 
 func main() {

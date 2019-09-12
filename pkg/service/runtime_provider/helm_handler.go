@@ -8,23 +8,16 @@ import (
 	"context"
 	"fmt"
 	"regexp"
-	"strings"
+
+	"helm.sh/helm/pkg/action"
+	"helm.sh/helm/pkg/chart"
+	rls "helm.sh/helm/pkg/release"
 
 	"google.golang.org/grpc/transport"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
-	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
-	"k8s.io/helm/pkg/helm"
-	"k8s.io/helm/pkg/helm/portforwarder"
-	"k8s.io/helm/pkg/proto/hapi/chart"
-	rls "k8s.io/helm/pkg/proto/hapi/services"
-	"k8s.io/helm/pkg/tiller/environment"
 
 	runtimeclient "openpitrix.io/openpitrix/pkg/client/runtime"
 	"openpitrix.io/openpitrix/pkg/constants"
 	"openpitrix.io/openpitrix/pkg/gerr"
-	"openpitrix.io/openpitrix/pkg/logger"
 	"openpitrix.io/openpitrix/pkg/util/funcutil"
 )
 
@@ -45,109 +38,114 @@ func GetHelmHandler(ctx context.Context, runtimeId string) *HelmHandler {
 	return helmHandler
 }
 
-func (p *HelmHandler) initKubeClient() (*kubernetes.Clientset, *rest.Config, error) {
-	kubeconfigGetter := func() (*clientcmdapi.Config, error) {
-		runtime, err := runtimeclient.NewRuntime(p.ctx, p.RuntimeId)
-		if err != nil {
-			return nil, err
-		}
-
-		return clientcmd.Load([]byte(runtime.RuntimeCredentialContent))
-	}
-
-	config, err := clientcmd.BuildConfigFromKubeconfigGetter("", kubeconfigGetter)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	config.CAData = config.CAData[0:0]
-	config.TLSClientConfig.Insecure = true
-
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return nil, nil, err
-	}
-	return clientset, config, err
-}
-
-func (p *HelmHandler) initHelmClient() (*helm.Client, error) {
-	client, clientConfig, err := p.initKubeClient()
-	if err != nil {
-		return nil, fmt.Errorf("could not get a kube client: %+v. ", err)
-	}
-
-	tunnel, err := portforwarder.New(environment.DefaultTillerNamespace, client, clientConfig)
-	if err != nil {
-		return nil, fmt.Errorf("could not get a connection to tiller: %+v. ", err)
-	}
-
-	hc := helm.NewClient(helm.Host(fmt.Sprintf("localhost:%d", tunnel.Local)))
-	return hc, nil
-}
+//func (p *HelmHandler) initKubeClient() (*kubernetes.Clientset, *rest.Config, error) {
+//	kubeconfigGetter := func() (*clientcmdapi.Config, error) {
+//		runtime, err := runtimeclient.NewRuntime(p.ctx, p.RuntimeId)
+//		if err != nil {
+//			return nil, err
+//		}
+//
+//		return clientcmd.Load([]byte(runtime.RuntimeCredentialContent))
+//	}
+//
+//	config, err := clientcmd.BuildConfigFromKubeconfigGetter("", kubeconfigGetter)
+//	if err != nil {
+//		return nil, nil, err
+//	}
+//
+//	config.CAData = config.CAData[0:0]
+//	config.TLSClientConfig.Insecure = true
+//
+//	clientset, err := kubernetes.NewForConfig(config)
+//	if err != nil {
+//		return nil, nil, err
+//	}
+//	return clientset, config, err
+//}
 
 func (p *HelmHandler) InstallReleaseFromChart(c *chart.Chart, ns string, rawVals []byte, releaseName string) error {
-	hc, err := p.initHelmClient()
+	runtime, err := runtimeclient.NewRuntime(p.ctx, p.RuntimeId)
 	if err != nil {
 		return err
 	}
 
-	_, err = hc.InstallReleaseFromChart(c, ns, helm.ValueOverrides(rawVals), helm.ReleaseName(releaseName), helm.InstallWait(true), helm.InstallTimeout(3600))
-	if err != nil {
-		return err
-	}
-	return nil
+	cfg := NewActionConfig(false, []byte(runtime.RuntimeCredentialContent))
+
+	installClient := action.NewInstall(cfg)
+	//installClient.ValueOptions.StringValues = []string{}
+	installClient.ReleaseName = releaseName
+
+	//validInstallableChart, err := chartutil.IsChartInstallable(c)
+	//if !validInstallableChart {
+	//	return err
+	//}
+	installClient.Namespace = getNamespace([]byte(runtime.RuntimeCredentialContent))
+	_, err = installClient.Run(c, nil)
+	return err
 }
 
 func (p *HelmHandler) UpdateReleaseFromChart(releaseName string, c *chart.Chart, rawVals []byte) error {
-	hc, err := p.initHelmClient()
+	runtime, err := runtimeclient.NewRuntime(p.ctx, p.RuntimeId)
 	if err != nil {
 		return err
 	}
+	cfg := NewActionConfig(false, []byte(runtime.RuntimeCredentialContent))
+	chartReq := &chart.Chart{}
 
-	_, err = hc.UpdateReleaseFromChart(releaseName, c, helm.UpdateValueOverrides(rawVals), helm.UpgradeWait(true), helm.UpgradeTimeout(3600))
-	if err != nil {
-		return err
-	}
-	return nil
+	updateClient := action.NewUpgrade(cfg)
+
+	//validInstallableChart, err := chartutil.IsChartInstallable(chartReq)
+	//if !validInstallableChart {
+	//	return err
+	//}
+	updateClient.Namespace = getNamespace([]byte(runtime.RuntimeCredentialContent))
+	_, err = updateClient.Run(releaseName, chartReq, nil)
+	return err
 }
 
 func (p *HelmHandler) RollbackRelease(releaseName string) error {
-	hc, err := p.initHelmClient()
+	runtime, err := runtimeclient.NewRuntime(p.ctx, p.RuntimeId)
 	if err != nil {
 		return err
 	}
+	cfg := NewActionConfig(false, []byte(runtime.RuntimeCredentialContent))
 
-	_, err = hc.RollbackRelease(releaseName, helm.RollbackWait(true), helm.RollbackTimeout(3600))
-	if err != nil {
-		return err
-	}
-	return nil
+	rollbackClient := action.NewRollback(cfg)
+
+	err = rollbackClient.Run(releaseName)
+
+	return err
 }
 
 func (p *HelmHandler) DeleteRelease(releaseName string, purge bool) error {
-	hc, err := p.initHelmClient()
+	runtime, err := runtimeclient.NewRuntime(p.ctx, p.RuntimeId)
 	if err != nil {
 		return err
 	}
+	cfg := NewActionConfig(false, []byte(runtime.RuntimeCredentialContent))
 
-	_, err = hc.DeleteRelease(releaseName, helm.DeletePurge(purge), helm.DeleteTimeout(3600))
-	if err != nil {
-		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "already deleted") {
-			logger.Warn(nil, "Delete helm release failed, %+v", err)
-			return nil
-		}
-		return err
-	}
-	return nil
+	uninstallClient := action.NewUninstall(cfg)
+
+	_, err = uninstallClient.Run(releaseName)
+
+	return err
 }
 
-func (p *HelmHandler) ReleaseStatus(releaseName string) (*rls.GetReleaseStatusResponse, error) {
-	hc, err := p.initHelmClient()
+func (p *HelmHandler) ReleaseStatus(releaseName string) (*rls.Release, error) {
+	runtime, err := runtimeclient.NewRuntime(p.ctx, p.RuntimeId)
+	if err != nil {
+		return nil, err
+	}
+	cfg := NewActionConfig(false, []byte(runtime.RuntimeCredentialContent))
+
+	statusClient := action.NewStatus(cfg)
+
+	release, err := statusClient.Run(releaseName)
 	if err != nil {
 		return nil, err
 	}
 
-	return hc.ReleaseStatus(releaseName)
+	return release, nil
 }
 
 func (p *HelmHandler) CheckClusterNameIsUnique(clusterName string) error {

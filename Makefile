@@ -2,8 +2,8 @@
 # Use of this source code is governed by a Apache license
 # that can be found in the LICENSE file.
 
-TARG.Name:=runtime-provider-kubernetes
-TRAG.Gopkg:=openpitrix.io/runtime-provider-kubernetes
+TARG.Name:=runtime-provider-helm3
+TRAG.Gopkg:=openpitrix.io/runtime-provider-helm3
 TRAG.Version:=$(TRAG.Gopkg)/pkg/version
 
 DOCKER_TAGS=latest
